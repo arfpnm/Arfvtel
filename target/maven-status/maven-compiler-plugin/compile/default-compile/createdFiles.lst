@@ -1,0 +1,10 @@
+com\telappliant\tvoip\asterisk\Asterisk$Listener.class
+com\telappliant\tvoip\asterisk\Event.class
+com\telappliant\callinfo\process\VoipOfficeCallInfoCaptureProcess.class
+com\telappliant\util\PropertyLoader.class
+com\telappliant\tvoip\asterisk\ManagerInterface.class
+com\telappliant\tvoip\asterisk\Asterisk$ExecEvent.class
+com\telappliant\tvoip\asterisk\VoipService.class
+com\telappliant\tvoip\asterisk\DelayedProcessForDelete.class
+com\telappliant\tvoip\asterisk\Asterisk.class
+com\telappliant\domain\Vocal.class

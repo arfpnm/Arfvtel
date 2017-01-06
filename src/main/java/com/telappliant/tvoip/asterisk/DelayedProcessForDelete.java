@@ -1,0 +1,38 @@
+package com.telappliant.tvoip.asterisk;
+
+import java.util.concurrent.Delayed;
+import java.util.concurrent.TimeUnit;
+
+import com.telappliant.domain.Vocal;
+
+public class DelayedProcessForDelete implements Delayed{
+	 private Vocal toBeDeletedItem;
+	    private long expireTime;
+	    
+	    public DelayedProcessForDelete(Vocal toBeDeletedItems, long delay){
+	        this.toBeDeletedItem = toBeDeletedItems;
+	        this.expireTime = System.currentTimeMillis() + delay;
+	    }
+	    
+	    @Override
+	    public long getDelay(TimeUnit unit) {
+	        long diff = expireTime - System.currentTimeMillis();
+	        return unit.convert(diff, TimeUnit.MILLISECONDS);
+	    }
+	    
+	    @Override
+	    public int compareTo(Delayed o) {
+	        if(this.getDelay(TimeUnit.MILLISECONDS) < o.getDelay(TimeUnit.MILLISECONDS)){
+	            return -1;
+	        }
+	        if(this.getDelay(TimeUnit.MILLISECONDS) > o.getDelay(TimeUnit.MILLISECONDS)){
+	            return 1;
+	        }
+	        return 0;
+	            
+	    }
+		public Vocal getToBeDeletedItem() {
+			return toBeDeletedItem;
+		}
+	    
+}

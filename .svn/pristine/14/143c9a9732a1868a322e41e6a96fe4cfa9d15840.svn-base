@@ -1,0 +1,203 @@
+package com.telappliant;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.mockito.Mockito.when;
+
+import java.io.IOException;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ConcurrentSkipListMap;
+
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.runners.MockitoJUnitRunner;
+
+import com.telappliant.callinfo.process.VoipOfficeCallInfoCaptureProcess;
+import com.telappliant.domain.Vocal;
+import com.telappliant.tvoip.asterisk.Asterisk;
+import com.telappliant.tvoip.asterisk.Event;
+import com.telappliant.tvoip.asterisk.ManagerInterface;
+import com.telappliant.tvoip.asterisk.VoipService;
+
+@RunWith(MockitoJUnitRunner.class)
+public class VocalProcessTest {
+
+	@Mock 
+	VoipOfficeCallInfoCaptureProcess voipProcess;
+
+	@InjectMocks
+	String authCode="Basic YmFydDo1MDNlYTI2NDhkNWJjYzg5NjFmZTI4YmEyNDEyMmExZTc4Y2Y0MjYwNjMxMWMwZjkwMTkxNTYyODk0ZjU0ODVi";
+
+	@Mock
+	private VoipService voipService = new VoipService();
+
+	@Mock
+	private Vocal callInfo = new Vocal();
+
+	@Mock
+	Asterisk asterisk;
+
+	@Mock 
+	ManagerInterface managerInterface;
+
+	//@Test
+	public void testHandleEventAndResponse() throws NoSuchAlgorithmException, NumberFormatException, IOException, InterruptedException{
+		List<Event> eventList = createEvents();
+		List<Vocal> callInfoList = new ArrayList<>();
+		String url = "localhost:8080/test";
+		String jsonStr = "test";
+		when(voipProcess.makeApiCallToUpdateVocal(authCode, url, jsonStr)).thenReturn("Success");
+		Mockito.doCallRealMethod().when(voipService).setInfoMap(new ConcurrentSkipListMap<String , Vocal>() );
+		voipService.setInfoMap(new ConcurrentSkipListMap<String , Vocal>() );
+		for(Event event : eventList){
+			String	channel = event.get("channel") == null?event.get("channel1"):event.get("channel");
+			Mockito.doCallRealMethod().when(voipService).getOrNew(channel);
+			Mockito.doCallRealMethod().when(voipService).handleEvent(asterisk, event);
+			Mockito.doCallRealMethod().when(voipService).handleResponse(asterisk, event);
+			Mockito.doCallRealMethod().when(voipService).getInfoMap();
+			when(asterisk.getManager()).thenReturn(managerInterface);
+			Mockito.doCallRealMethod().when(managerInterface).sendCmd("GetVar", "ActionId", "SIP/84419678-0000001b", "Channel", "SIP/84419678-0000001b", "Variable", "SIP_HEADER(X-AccountCode)");
+
+			voipService.handleEvent(asterisk, event);
+			voipService.handleResponse(asterisk, event);
+			ConcurrentSkipListMap<String , Vocal> infoMap = voipService.getInfoMap();
+			callInfoList.add(infoMap != null ? infoMap.get(channel) : null);
+		}
+	}
+
+	@Test
+	public void testArgumentInSendCommandPositive() throws IOException{
+		Event event = createEvents().get(0);
+		String	channel = event.get("channel") == null?event.get("channel1"):event.get("channel");
+		ArgumentCaptor<String> argument1 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument2 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument3 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument4 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument5 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument6 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument7 = ArgumentCaptor.forClass(String.class);
+
+		managerInterface.sendCmd("GetVar", "ActionId", "SIP/84419678-0000001b", "Channel", "SIP/84419678-0000001b", "Variable", "SIP_HEADER(X-AccountCode)");
+		Mockito.verify(managerInterface).sendCmd(argument1.capture(), argument2.capture(),argument3.capture(), argument4.capture(),argument5.capture(), argument6.capture(), argument7.capture());
+
+		assertEquals(argument1.getValue(), "GetVar");
+		assertEquals(argument2.getValue(), "ActionId");
+		assertEquals(argument3.getValue(), channel);
+		assertEquals(argument4.getValue(), "Channel");
+		assertEquals(argument5.getValue(), channel);
+		assertEquals(argument6.getValue(), "Variable");
+		assertEquals(argument7.getValue(), "SIP_HEADER(X-AccountCode)");
+	}
+
+	@Test
+	public void testArgumentInSendCommandNagative() throws IOException{
+		Event event = createEvents().get(0);
+		String	channel = event.get("channel") == null?event.get("channel1"):event.get("channel");
+		ArgumentCaptor<String> argument1 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument2 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument3 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument4 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument5 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument6 = ArgumentCaptor.forClass(String.class);
+		ArgumentCaptor<String> argument7 = ArgumentCaptor.forClass(String.class);
+
+		managerInterface.sendCmd("GetVar", "ActionId", "SIP/84419678-0000001b", "Channel", "SIP/84419678-0000001b", "Variable", "SIP_HEADER(X-AccountCode)");
+		Mockito.verify(managerInterface).sendCmd(argument1.capture(), argument2.capture(),argument3.capture(), argument4.capture(),argument5.capture(), argument6.capture(), argument7.capture());
+		assertNotEquals(argument1.getValue(), "GetVar1");
+		assertNotEquals(argument2.getValue(), "ActionId1");
+		assertNotEquals(argument3.getValue(), channel+"XY");
+		assertNotEquals(argument4.getValue(), "Channel77");
+		assertNotEquals(argument5.getValue(), channel+"XY");
+		assertNotEquals(argument6.getValue(), "Variable22");
+		assertNotEquals(argument7.getValue(), "SIP_HEADER(X-AccountCode32)");
+	}
+
+	@Test
+	public void testUpdateCallInfoThroughApi() throws NoSuchAlgorithmException, NumberFormatException, IOException{
+		String url = "localhost:8080/CardAssureAPI/rest/vocal";
+		String jsonStr = "Success";
+		String authCodeRet=when(voipProcess.createAuthentication()).thenReturn(authCode).toString();
+		when(voipProcess.makeApiCallToUpdateVocal(authCodeRet, url, jsonStr)).thenReturn("Success");
+		when(voipService.getAuthToken()).thenReturn(authCode);
+
+		String test=voipProcess.createAuthentication();
+		String jsonString=voipProcess.makeApiCallToUpdateVocal(authCodeRet, url, jsonStr);
+		String test3=voipService.getAuthToken();
+	}
+
+	@Test
+	public void testDeleteCallInfoThroughApi() throws NoSuchAlgorithmException, NumberFormatException, IOException{
+		String url = "localhost:8080/CardAssureAPI/rest/vocal";
+		String jsonStr = "Success";
+		String authCodeRet=when(voipProcess.createAuthentication()).thenReturn(authCode).toString();
+		when(voipProcess.makeApiCallToDeleteVocal(authCodeRet, url, jsonStr)).thenReturn("Success");
+		when(voipService.getAuthToken()).thenReturn(authCode);
+
+		String test=voipProcess.createAuthentication();
+		String jsonString=voipProcess.makeApiCallToUpdateVocal(authCodeRet, url, jsonStr);
+		String test3=voipService.getAuthToken();
+	}
+	
+
+	//Mocking Event values
+	public List<Event> createEvents(){
+		Event event = new Event();
+		List<Event> eventList = new ArrayList<>();
+		event.put("event", "Newchannel");
+		event.put("privilege", "call,all");
+		event.put("channel", "SIP/84419678-0000001b");
+		event.put("channelstate", "0");
+		event.put("calleridnum", "08450044040");
+		event.put("calleridname", "08450044040");
+		event.put("accountcode", "");
+		event.put("exten", "02476998339");
+		event.put("uniqueid", "1481217021.27");
+
+		Event event1 = new Event();
+		event1.put("event", "Bridge");
+		event1.put("privilege", "call,all");
+		event1.put("channel1", "SIP/84419678-0000001b");
+		event1.put("channel2", "SIP/1003-0000001a");
+		event1.put("callerid1", "08450044040");
+		event1.put("callerid2", "1003");
+		event1.put("uniqueid1", "1481216664.24");
+		event1.put("uniqueid2", "1481216664.26");
+
+		Event event2 = new Event();
+		event2.put("event", "Hangup");
+		event2.put("privilege", "call,all");
+		event2.put("channel", "SIP/84419678-0000001b");
+		event2.put("calleridnum", "08450044040");
+		event2.put("calleridname", "08450044040");
+		event2.put("connectedlinename", "08450044040");
+		event2.put("uniqueid", "1481217021.27");
+
+		Event event3 = new Event();
+		event3.put("event", "Hangup");
+		event3.put("privilege", "call,all");
+		event3.put("channel", "SIP/84419678-0000001b");
+		event3.put("calleridnum", "08450044040");
+		event3.put("calleridname", "08450044040");
+		event3.put("connectedlinename", "08450044040");
+		event3.put("uniqueid", "1481217021.27");
+
+		Event response = new Event();
+		response.put("response", "Success");
+		response.put("actionid", "SIP/84419678-0000001b");
+		response.put("channel", "SIP/84419678-0000001b");
+		response.put("value", "TEST-gw01-1481647478.304");
+
+		eventList.add(event);
+		eventList.add(event1);
+		eventList.add(event2);
+		eventList.add(response);
+		eventList.add(event3);
+		return eventList;
+	}
+}

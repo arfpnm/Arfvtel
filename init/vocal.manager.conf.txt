@@ -1,0 +1,15 @@
+[vocal]
+secret = vhD%ZjTmy^36
+deny = 0.0.0.0/0.0.0.0
+permit = 127.0.0.1/255.255.255.255
+read = call
+write = call
+writetimeout=10000
+eventfilter=Event: Hangup
+eventfilter=Event: Newchannel
+eventfilter=Event: Bridge
+eventfilter=Response: *
+
+
+
+

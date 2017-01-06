@@ -1,0 +1,48 @@
+#!/bin/bash
+SERVICE_NAME=vocal
+PIDFILE=${1:-/var/run/${SERVICE_NAME}.pid}
+LOGPROP=/local/etc/vocal.log.properties
+JARFILE=/home/jenkins/vocal.jar
+RETVAL=0
+PID=0
+JAVA=/usr/bin/java
+NOHUP=/usr/bin/nohup
+
+real_start() {	
+	local RET=0
+	${NOHUP} ${JAVA} -Djava.util.logging.config.file="${LOGPROP}" -jar ${JARFILE} /tmp 2>> /dev/null >> /dev/null &
+	RET=$?
+	PID=$!
+	echo ${PID} > $PIDFILE
+	return ${RET}
+}
+
+checkpid() {
+	local i
+
+	for i in $* ; do
+		[ -d "/proc/$i" ] && return 0
+	done
+	return 1
+}
+
+start() {
+	local RET=0
+	if [ ! -f $PIDFILE ]; then
+		real_start
+		RET=$?
+	else
+		PID=`cat ${PIDFILE}`
+		if checkpid ${PID} 2>&1; then
+			RET=3
+		else
+			real_start
+			RET=$?
+		fi
+	fi
+	return ${RET}
+}
+
+start
+RETVAL=$?
+exit ${RETVAL}

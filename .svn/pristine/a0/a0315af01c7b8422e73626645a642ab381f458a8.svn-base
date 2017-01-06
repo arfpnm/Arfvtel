@@ -1,0 +1,257 @@
+package com.telappliant.callinfo.process;
+
+import static com.telappliant.util.PropertyLoader.getPropertyValue;
+
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
+import java.util.Date;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.Executors;
+import java.util.logging.Logger;
+
+import javax.ws.rs.core.MediaType;
+import javax.xml.bind.DatatypeConverter;
+
+import org.apache.http.HttpHeaders;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import com.sun.jersey.api.client.Client;
+import com.sun.jersey.api.client.ClientHandlerException;
+import com.sun.jersey.api.client.ClientResponse;
+import com.sun.jersey.api.client.UniformInterfaceException;
+import com.sun.jersey.api.client.WebResource;
+import com.sun.jersey.api.client.config.DefaultClientConfig;
+import com.telappliant.domain.Vocal;
+import com.telappliant.tvoip.asterisk.Asterisk;
+import com.telappliant.tvoip.asterisk.DelayedProcessForDelete;
+import com.telappliant.tvoip.asterisk.VoipService;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+
+public class VoipOfficeCallInfoCaptureProcess {
+
+	private static  Logger log = Logger.getLogger(VoipOfficeCallInfoCaptureProcess.class.getName());
+	private volatile String authToken;
+	private VoipService vs;
+
+	public static void main(String[] args) {
+		VoipOfficeCallInfoCaptureProcess persistVocalProcess = new VoipOfficeCallInfoCaptureProcess();
+		persistVocalProcess.vocalProcess();
+	}
+
+	/**
+	 * @return String
+	 * 
+	 * This method executes the vocal process.
+	 * Processes like token generation, validation to make API calls is done here.
+	 * "startVoipOfficeEventCaptureProcess"  method, starts the vocal (VIOP) process and updates the API and finally deletes the captured information after end of the calls.
+	 * Token validation/creation will be running in its own thread task (tokenTask) and delete the captured information runs in its own thread (deleteTask).
+	 * The call info, that has to be deleted is added in BlockingQueue<DelayedProcessForDelete> during the "Hangup" event or if the "Hangup" event is missed, 
+	 * its added to queue during the new call process trigger and then deleted after some hours (max hours set to 4).
+	 */
+	public String vocalProcess(){
+		vs = new VoipService();
+		BlockingQueue<DelayedProcessForDelete> delayQ = vs.getDelayQ();
+		ConcurrentSkipListMap<String, Vocal> infoMap = vs.getInfoMap();
+
+		//Initial authorisation code generation
+		try {
+			authToken = createAuthentication();
+			vs.setAuthToken(authToken);	
+		} catch (NoSuchAlgorithmException e) {
+			e.printStackTrace();
+		}
+
+		//Thread to run the authorisation code generation
+		Runnable tokenTask = () -> {
+			try {
+				while(true) {
+					if(validateToken(authToken)) {
+						authToken = createAuthentication();
+						vs.setAuthToken(authToken);	
+					}
+					Thread.sleep(10000);
+				}
+			} catch (NoSuchAlgorithmException | InterruptedException e) {
+				e.printStackTrace();
+			}
+		};
+		Thread tokenThread = new Thread(tokenTask);
+		tokenThread.start();
+
+		Runnable deleteTask = () -> {
+			try {
+				while(true) {
+					Vocal callInfo = delayQ.take().getToBeDeletedItem();
+					if(callInfo != null && callInfo.getId() != null) {
+						log.info(" Deleting the call info items from the blocked queue, channel1: " + callInfo.getChannel1());
+						String response = vs.makeApiCallToDeleteVocal(callInfo);
+						//response will be null in case if the delete fails or any exception occurs
+						if(response == null) {
+							callInfo.setDelayDelete(new DelayedProcessForDelete(callInfo, 2000));
+						}
+					}
+					infoMap.remove(callInfo.getChannel1());
+					Thread.sleep(100);
+				}
+			} catch (InterruptedException e) {
+				log.severe("InterruptedException while retrieving value from the Queue " + e.getMessage());
+			} catch (JSONException e){
+				log.severe("JSONException while running the get token task" + e.getMessage());
+			}
+
+		};
+		Thread deleteThread = new Thread(deleteTask);
+		deleteThread.start();
+
+		try {
+			//VOIP Office - capture call information
+			while(validateToken(authToken)) {
+				//log.info("Waiting for valid AuthToken");
+				Thread.sleep(5000);
+			}
+			startVoipOfficeEventCaptureProcess();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return "Success";
+	}
+
+	/**
+	 * @return String
+	 * @throws NumberFormatException
+	 * @throws IOException
+	 * 
+	 * Starts VOIP office call process.
+	 */
+	public String startVoipOfficeEventCaptureProcess() throws NumberFormatException, IOException{
+		Asterisk asterisk = new Asterisk(Executors.newCachedThreadPool(), 
+				getPropertyValue("voip-name"),
+				getPropertyValue("voip-addr"),
+				Integer.valueOf(getPropertyValue("voip-port")).intValue(), 
+				getPropertyValue("voip-user"), 
+				getPropertyValue("voip-password"),
+				false);
+		asterisk.addListener(vs);
+		asterisk.start();
+		return "Sucess";
+	}
+
+	/**
+	 * @return String
+	 * @throws NoSuchAlgorithmException
+	 * 
+	 * Creates authentication token, that requires to be sent to CardAssureAPI REST call
+	 */
+	public String createAuthentication() throws NoSuchAlgorithmException{
+		String token=null;
+		try {
+			String user=getPropertyValue("api-user-name");
+			String password=getEncoded(getPropertyValue("api-password"));
+			String auth = user + ":" + password;
+			byte[] encodedAuth = Base64.getEncoder().encode( 
+					auth.getBytes(Charset.forName("US-ASCII")) );
+			String authHeader = "Basic " + new String( encodedAuth );
+			String url = new StringBuilder(getPropertyValue("host-url")).append(getPropertyValue("web-context")).append(getPropertyValue("authenticate")).toString();
+			WebResource resource = Client.create(new DefaultClientConfig()).resource(url);
+			ClientResponse response = resource.accept(MediaType.APPLICATION_JSON).type("application/json").header("Authorization", authHeader).post(ClientResponse.class);
+			String jsonStr = response.getEntity(String.class);
+			jsonStr = vs.isValid(jsonStr) ? jsonStr : null;
+			JSONObject jsonObject = null;
+			if(jsonStr != null && !jsonStr.isEmpty()){
+				jsonObject = new JSONObject(jsonStr);
+				token = (String) jsonObject.get("token");
+			}
+		} catch (UniformInterfaceException e) {
+			e.printStackTrace();
+		} catch (ClientHandlerException e) {
+			e.printStackTrace();
+		} catch (JSONException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return token;
+	}
+
+	/**
+	 * @param token
+	 * @param url
+	 * @param inputParam
+	 * @return String
+	 * 
+	 * This method makes an API call to CardAssureAPI to update the call information.
+	 */
+	public String makeApiCallToUpdateVocal(String token, String url, String inputParam){
+		WebResource resource = Client.create(new DefaultClientConfig()).resource(url);
+		WebResource.Builder builder = resource.accept(MediaType.APPLICATION_JSON);
+		ClientResponse response = builder.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header("x-api-version", "2")
+				.type(MediaType.APPLICATION_JSON)
+				.post(ClientResponse.class, inputParam);
+		String results = response.getStatus() != 200 ? null : response.getEntity(String.class);
+		return results;
+	}
+
+	/**
+	 * @param token
+	 * @param url
+	 * @return String
+	 * 
+	 * This method makes an API call to CardAssureAPI delete the call information.
+	 */
+	public String makeApiCallToDeleteVocal(String token, String url){
+		WebResource resource = Client.create(new DefaultClientConfig()).resource(url);
+		WebResource.Builder builder = resource.accept(MediaType.APPLICATION_JSON);
+		ClientResponse response = builder.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header("x-api-version", "2")
+				.type(MediaType.APPLICATION_JSON)
+				.delete(ClientResponse.class);
+		String results = response.getStatus() < 200 || response.getStatus() > 300 ? null : response.getEntity(String.class);
+		return results;
+	}
+
+	public String getEncoded(String password) throws NoSuchAlgorithmException{
+		return DatatypeConverter.printHexBinary(MessageDigest.getInstance("SHA-256").digest(password.getBytes())).toLowerCase();
+	}
+
+	public boolean validateToken(String token) {
+		if(token == null) return false;
+
+		String[] headerAndCliams = token.split("\\.");
+		Claims claims = Jwts.parser().parseClaimsJwt(headerAndCliams[0] + "." + headerAndCliams[1] + ".").getBody();
+
+		String emailId = claims.get("emailId", String.class);
+		if (emailId == null || emailId.isEmpty()) {
+			return false;
+		}
+
+		String type = claims.get("type", String.class);
+		if (type == null || type.isEmpty() || !(type.equals("signIn") || type.equals("forgotPassword"))) {
+			return false;
+		}
+
+		Date expiry = claims.get("expiry", Date.class);
+		if (expiry == null || expiry.before(new Date(System.currentTimeMillis()))) {
+			return false;
+		}
+
+		String subject = claims.getSubject();
+		if (subject == null || subject.isEmpty()) {
+			return false;
+		}
+
+		String userId = claims.get("userId", String.class);
+		if (userId == null || userId.isEmpty()) {
+			return false;
+		}
+		return true;
+	}
+
+}
